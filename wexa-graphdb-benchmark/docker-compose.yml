@@ -16,12 +16,14 @@ services:
     image: neo4j:5-community
     environment:
       - NEO4J_AUTH=neo4j/benchmarkpass123
-      - NEO4J_dbms_memory_heap_max__size=192m
-      - NEO4J_dbms_memory_pagecache_size=48m
+      - NEO4J_server_memory_heap_max__size=192m
+      - NEO4J_server_memory_pagecache_size=48m
+      - NEO4J_server_jvm_additional=-XX:MaxMetaspaceSize=200m -XX:MaxDirectMemorySize=64m
+      - NEO4J_dbms_usage__report_enabled=false
     ports:
       - "7474:7474"
       - "7687:7687"
-    mem_limit: 256m
+    mem_limit: 512m
     cpus: 0.5
     volumes:
       - neo4j_data:/data
