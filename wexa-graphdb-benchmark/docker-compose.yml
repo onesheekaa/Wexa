@@ -1,0 +1,73 @@
+# Every self-hosted service below is capped to the same resources as
+# CognoDB's free (c0) tier - 0.5 vCPU / 256MB RAM - so no platform gets
+# a hardware advantage (assignment section 3, "fairness note").
+#
+# Docker doesn't enforce a hard disk quota without a specific storage
+# driver, so disk usage is instead measured after the fact with
+# `docker exec <container> du -sh <data dir>` and written into the
+# README's footprint table by hand - documented as a methodology
+# caveat rather than silently skipped.
+#
+# Bring everything up:  docker compose up -d
+# Tear everything down:  docker compose down -v
+
+services:
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      - NEO4J_AUTH=neo4j/benchmarkpass123
+      - NEO4J_dbms_memory_heap_max__size=192m
+      - NEO4J_dbms_memory_pagecache_size=48m
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    mem_limit: 256m
+    cpus: 0.5
+    volumes:
+      - neo4j_data:/data
+
+  memgraph:
+    image: memgraph/memgraph:latest
+    command: ["--memory-limit=200"]
+    ports:
+      - "7688:7687"
+    mem_limit: 256m
+    cpus: 0.5
+    volumes:
+      - memgraph_data:/var/lib/memgraph
+
+  arangodb:
+    image: arangodb:3.11
+    environment:
+      - ARANGO_ROOT_PASSWORD=benchmarkpass123
+    ports:
+      - "8529:8529"
+    mem_limit: 256m
+    cpus: 0.5
+    volumes:
+      - arango_data:/var/lib/arangodb3
+
+  dgraph-zero:
+    image: dgraph/dgraph:latest
+    command: dgraph zero --my=dgraph-zero:5080
+    mem_limit: 64m
+    cpus: 0.15
+
+  dgraph-alpha:
+    image: dgraph/dgraph:latest
+    command: dgraph alpha --my=dgraph-alpha:7080 --zero=dgraph-zero:5080 --security whitelist=0.0.0.0/0
+    ports:
+      - "8080:8080"
+      - "9080:9080"
+    mem_limit: 192m
+    cpus: 0.35
+    depends_on:
+      - dgraph-zero
+    volumes:
+      - dgraph_data:/dgraph
+
+volumes:
+  neo4j_data:
+  memgraph_data:
+  arango_data:
+  dgraph_data:
