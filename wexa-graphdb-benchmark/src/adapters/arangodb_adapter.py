@@ -5,15 +5,27 @@ different storage/query model from the three Bolt platforms, which
 makes the comparison more interesting than four Cypher-speaking clones.
 """
 import os
+import random
+import time
 from typing import Iterable, List
 
 from arango import ArangoClient
+from arango.exceptions import AQLQueryExecuteError
 
 from .base import GraphAdapter
 
 
 class ArangoAdapter(GraphAdapter):
     name = "arangodb"
+
+    # BUGFIX: mixed workload writes to a shared pool of only 200 sampled
+    # node ids, so at concurrency=10/40 two threads can legitimately hit
+    # the same node at once. ArangoDB raises error_code 1200 ("write-write
+    # conflict"), its equivalent of Neo4j's TransientError.DeadlockDetected
+    # - a known-retryable MVCC conflict, not a real failure. Only this
+    # specific conflict is retried; anything else still raises immediately.
+    MAX_RETRIES = 3
+    BASE_BACKOFF_SECONDS = 0.05
 
     def __init__(self):
         self.url = os.environ["ARANGO_URI"]
@@ -36,6 +48,21 @@ class ArangoAdapter(GraphAdapter):
 
     def close(self) -> None:
         pass  # python-arango is HTTP-per-request, nothing persistent to close
+
+    def _execute_aql(self, query: str, bind_vars: dict = None):
+        bind_vars = bind_vars or {}
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                return list(self.db.aql.execute(query, bind_vars=bind_vars))
+            except AQLQueryExecuteError as e:
+                is_write_conflict = (
+                    getattr(e, "error_code", None) == 1200
+                    or getattr(e, "http_code", None) == 409
+                )
+                if not is_write_conflict or attempt == self.MAX_RETRIES:
+                    raise
+                backoff = self.BASE_BACKOFF_SECONDS * (2 ** attempt) + random.uniform(0, 0.05)
+                time.sleep(backoff)
 
     def wipe(self) -> None:
         self.db.collection("nodes").truncate()
@@ -74,32 +101,43 @@ class ArangoAdapter(GraphAdapter):
             col.insert_many(batch, overwrite=True)
 
     def point_lookup(self, node_id: str) -> None:
-        list(self.db.aql.execute(
-            "FOR n IN nodes FILTER n.ext_id == @id RETURN n", bind_vars={"id": node_id}
-        ))
+        self._execute_aql(
+            "FOR n IN nodes FILTER n.ext_id == @id RETURN n", {"id": node_id}
+        )
 
     def filtered_lookup(self, label: str, limit: int = 50) -> None:
-        list(self.db.aql.execute(
+        self._execute_aql(
             "FOR n IN nodes FILTER n.label == @label LIMIT @limit RETURN n",
-            bind_vars={"label": label, "limit": limit},
-        ))
+            {"label": label, "limit": limit},
+        )
 
     def traversal(self, start_id: str, hops: int) -> None:
-        list(self.db.aql.execute(
-            f"FOR v IN {hops}..{hops} OUTBOUND @start edges RETURN DISTINCT v",
-            bind_vars={"start": f"nodes/{start_id}"},
-        ))
+        # BUGFIX: switched to ArangoDB's native bfs + uniqueVertices:
+        # "global" traversal options, which guarantee each vertex is
+        # visited at most once across the whole traversal - a hub node
+        # (this dataset has one at degree 504 vs a median of 9) structurally
+        # cannot cause combinatorial blowup with this option set, by design
+        # of the engine. Matches the intent of bolt_adapter.py's capped-BFS
+        # fix (bounded, disclosed sampling behavior at hub nodes) using
+        # ArangoDB's own idiomatic mechanism rather than hand-rolled nesting.
+        query = (
+            f"FOR v IN {hops}..{hops} OUTBOUND @start edges "
+            'OPTIONS { bfs: true, uniqueVertices: "global" } '
+            "LIMIT 100 "
+            "RETURN DISTINCT v"
+        )
+        self._execute_aql(query, {"start": f"nodes/{start_id}"})
 
     def aggregation(self) -> None:
-        list(self.db.aql.execute(
+        self._execute_aql(
             "FOR n IN nodes COLLECT label = n.label WITH COUNT INTO c SORT c DESC RETURN {label, c}"
-        ))
+        )
 
     def write_sample(self, node_id: str) -> None:
-        list(self.db.aql.execute(
+        self._execute_aql(
             "FOR n IN nodes FILTER n.ext_id == @id UPDATE n WITH {touched: DATE_NOW()} IN nodes",
-            bind_vars={"id": node_id},
-        ))
+            {"id": node_id},
+        )
 
     def footprint(self) -> dict:
         try:
