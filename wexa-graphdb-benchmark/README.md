@@ -12,7 +12,7 @@ for multi-model flexibility, Dgraph's distributed design shows overhead at this 
 ## 1. Platforms compared
 
 | Platform | Deployment | Query language | Why it's here |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | CognoDB Cloud | Managed cloud, free `c0` tier | Cypher over Bolt | The subject of the assignment |
 | Neo4j Community 5 | Self-hosted (Docker) | Cypher over Bolt | Closest apples-to-apples comparison — CognoDB speaks the same protocol |
 | Memgraph | Self-hosted (Docker) | Cypher over Bolt | In-memory graph engine — tests whether storage model beats query language as the deciding factor |
@@ -33,15 +33,26 @@ CognoDB's free tier is fixed at **burstable 0.5 vCPU, 256 MB RAM, 1 GB disk**. E
 self-hosted container in `docker-compose.yml` is capped to match:
 
 | Platform | vCPU | RAM | Disk |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | CognoDB Cloud | 0.5 (burstable) | 256 MB | 1 GB |
-| Neo4j | 0.5 (`cpus: 0.5`) | 256 MB (`mem_limit: 256m`) | _(see caveat below)_ |
+| Neo4j | 0.5 (`cpus: 0.5`) | **512 MB** (`mem_limit: 512m`) | _(see caveat below)_ |
 | Memgraph | 0.5 | 256 MB | _(see caveat below)_ |
 | ArangoDB | 0.5 | 256 MB | _(see caveat below)_ |
-| Dgraph (zero+alpha combined) | 0.5 | 256 MB | _(see caveat below)_ |
+| Dgraph (zero+alpha combined) | 0.5 (0.15 + 0.35) | 256 MB (64 MB + 192 MB) | _(see caveat below)_ |
 
-**Caveat, stated honestly:** Docker's `mem_limit`/`cpus` enforce CPU and memory hard
-limits, but there's no equivalent one-line disk quota without a specific storage
+**Caveat, stated honestly:** Neo4j is the one platform not held to the 256 MB line.
+Its own JVM tuning in `docker-compose.yml` — 192 MB heap + 48 MB page cache + 200 MB
+metaspace ceiling + 64 MB direct memory — already adds up to roughly 500 MB before the
+container even starts serving queries, so a true 256 MB cap causes an OOM-kill on
+startup rather than a slow-but-working instance. Doubling Neo4j's ceiling to 512 MB
+while leaving every other self-hosted platform at 256 MB is a real, disclosed deviation
+from strict parity — not a silent one. It should be read as a data point in its own
+right: Neo4j 5's baseline JVM footprint is high enough that it cannot run at all in the
+same envelope CognoDB's free tier fits in, which is itself a fairness-relevant finding
+worth a line in the analysis section, not just a footnote here.
+
+**Second caveat, stated honestly:** Docker's `mem_limit`/`cpus` enforce CPU and memory
+hard limits, but there's no equivalent one-line disk quota without a specific storage
 driver/filesystem setup. Disk usage is instead measured after each load with
 `docker exec <container> du -sh <data-dir>` and recorded by hand in the footprint table
 below, rather than silently left unmeasured.
@@ -67,7 +78,7 @@ Built by `python -m src.dataset`, which downloads the raw edge list and writes
 ## 4. Load method per platform
 
 | Platform | Load method |
-|---|---|
+| --- | --- |
 | CognoDB / Neo4j / Memgraph | Batched `UNWIND ... CREATE` via the official `neo4j` Python driver, 1,000 rows/batch |
 | ArangoDB | `insert_many()` batched document/edge inserts via `python-arango`, 1,000 rows/batch |
 | Dgraph | Batched RDF mutations via `pydgraph`, 1,000 rows/batch |
@@ -84,12 +95,12 @@ from `results/*.json` — do not hand-edit `RESULTS.md`, regenerate it instead.
 Summary (fill in top-line numbers after your run):
 
 | Metric | CognoDB | Neo4j | Memgraph | ArangoDB | Dgraph |
-|---|---|---|---|---|---|
-| Ingest (rels/s) | | | | | |
-| 1-hop p50 / p95 (ms) | | | | | |
-| 3-hop p50 / p95 (ms) | | | | | |
-| Point lookup p50 (ms) | | | | | |
-| Mixed workload @ 10 clients (qps) | | | | | |
+| --- | --- | --- | --- | --- | --- |
+| Ingest (rels/s) |     |     |     |     |     |
+| 1-hop p50 / p95 (ms) |     |     |     |     |     |
+| 3-hop p50 / p95 (ms) |     |     |     |     |     |
+| Point lookup p50 (ms) |     |     |     |     |     |
+| Mixed workload @ 10 clients (qps) |     |     |     |     |     |
 
 ## 6. Methodology notes
 
@@ -107,6 +118,7 @@ Summary (fill in top-line numbers after your run):
 ## 7. Caveats (recorded honestly, not hidden)
 
 _(Fill in as you actually hit them — examples of the kind of thing that belongs here:)_
+
 - CognoDB free tier throttling observed at concurrency > N, causing timeouts on M% of runs.
 - Network latency to CognoDB's region adds a fixed ~X ms floor not present in the
   same-machine self-hosted comparisons — noted, not corrected for.

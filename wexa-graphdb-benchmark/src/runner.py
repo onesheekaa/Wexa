@@ -14,6 +14,7 @@ import argparse
 import csv
 import json
 import random
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -140,11 +141,22 @@ def run_mixed_workload(build_adapter_fn, start_ids) -> dict:
     safe to share a single session across threads."""
     out = {}
     for concurrency in MIXED_WORKLOAD_CLIENTS:
-        stop_at = time.perf_counter() + MIXED_WORKLOAD_SECONDS
+        # BUGFIX: stop_at used to be fixed *before* any worker connected, so
+        # each thread's connection/handshake time ate into its 30s budget -
+        # unevenly, since e.g. CognoDB's network+TLS handshake costs more
+        # than a local Docker container's. A barrier makes every worker
+        # finish connecting before the clock starts, so all platforms are
+        # timed on an equal, connection-cost-free window.
+        barrier = threading.Barrier(concurrency)
+        stop_at_holder = {}
 
         def worker():
             local_adapter = build_adapter_fn()
             local_adapter.connect()
+            barrier.wait()  # all workers cross this line before anyone starts timing
+            stop_at = stop_at_holder.setdefault(
+                "t", time.perf_counter() + MIXED_WORKLOAD_SECONDS
+            )
             ops = 0
             while time.perf_counter() < stop_at:
                 sid = random.choice(start_ids)
@@ -159,12 +171,22 @@ def run_mixed_workload(build_adapter_fn, start_ids) -> dict:
         t0 = time.perf_counter()
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             total_ops = sum(f.result() for f in [pool.submit(worker) for _ in range(concurrency)])
-        elapsed = time.perf_counter() - t0
+        wall_clock_seconds = time.perf_counter() - t0
 
+        # BUGFIX: throughput is now computed against MIXED_WORKLOAD_SECONDS,
+        # the window every worker is actually timed against post-barrier -
+        # not wall_clock_seconds, which still includes each thread's
+        # connect() cost before the barrier and close() cost after it. Using
+        # wall_clock_seconds here would silently re-introduce the same
+        # per-platform connection-cost skew the barrier above was added to
+        # remove (e.g. CognoDB's network handshake vs. a local container's).
+        # wall_clock_seconds is kept in the output for transparency, not
+        # used in the qps math.
         out[f"{concurrency}_clients"] = {
             "total_ops": total_ops,
-            "elapsed_seconds": round(elapsed, 2),
-            "throughput_qps": round(total_ops / elapsed, 2),
+            "measured_window_seconds": MIXED_WORKLOAD_SECONDS,
+            "wall_clock_seconds": round(wall_clock_seconds, 2),
+            "throughput_qps": round(total_ops / MIXED_WORKLOAD_SECONDS, 2),
             "write_ratio": MIXED_WRITE_RATIO,
         }
     return out

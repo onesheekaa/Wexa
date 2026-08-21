@@ -1,6 +1,6 @@
-neo4j>=5.14
-python-arango>=7.9
-pydgraph>=21.3.2
-python-dotenv>=1.0
-numpy>=1.26
-matplotlib>=3.8
+neo4j==5.28.4
+python-arango==8.3.3
+pydgraph==25.2.0
+python-dotenv==1.2.3
+numpy==2.5.2
+matplotlib==3.11.1

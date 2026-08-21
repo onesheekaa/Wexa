@@ -39,6 +39,19 @@ class DgraphAdapter(GraphAdapter):
         touched: int .
         """
         self.client.alter(pydgraph.Operation(schema=schema))
+        # BUGFIX: run_mixed_workload() in runner.py opens a *fresh* adapter
+        # per worker thread and only calls connect() - it never calls
+        # load_nodes(). _uid_cache was previously only populated inside
+        # load_nodes(), so every write_sample() from a mixed-workload worker
+        # found an empty cache and silently no-op'd (see write_sample below):
+        # 100% of Dgraph's "writes" during the mixed workload were doing
+        # nothing, which would have made Dgraph look artificially fastest.
+        # Refresh here too. Wrapped in try/except because this also runs
+        # right after wipe()'s drop_all, when there's nothing to cache yet.
+        try:
+            self._refresh_uid_cache()
+        except Exception:
+            pass
 
     def close(self) -> None:
         if self.client_stub:
