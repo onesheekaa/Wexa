@@ -41,6 +41,7 @@ def download() -> None:
 
 def build_csvs() -> None:
     node_ids = set()
+    seen_pairs = set()
     edges = []
     with gzip.open(RAW_PATH, "rt") as f:
         for line in f:
@@ -49,6 +50,16 @@ def build_csvs() -> None:
             src, dst = line.strip().split("\t")
             node_ids.add(src)
             node_ids.add(dst)
+            # BUGFIX: ca-AstroPh.txt.gz stores each undirected collaboration
+            # as TWO directed lines (src->dst and dst->src) - SNAP's standard
+            # format for symmetrized graphs. Loading every line as-is
+            # silently doubles the documented edge count and makes every
+            # traversal query walk a much denser graph than intended.
+            # Dedupe to one edge per undirected pair.
+            pair = tuple(sorted((src, dst)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
             edges.append((src, dst))
 
     random.seed(42)

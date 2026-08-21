@@ -1,0 +1,90 @@
+{
+  "platform": "neo4j",
+  "timestamp": "2026-08-21T10:11:47Z",
+  "ingest": {
+    "index_report": [
+      "node_id_idx on Node(id)",
+      "node_label_idx on Node(label)"
+    ],
+    "node_load_seconds": 18.976,
+    "edge_load_seconds": 83.426,
+    "nodes_per_second": 989.2,
+    "rels_per_second": 2374.7,
+    "total_wall_clock_seconds": 102.402,
+    "node_count": 18772,
+    "rel_count": 198110
+  },
+  "traversals": {
+    "1_hop": {
+      "p50_ms": 17.698,
+      "p95_ms": 104.091,
+      "min_ms": 2.934,
+      "max_ms": 110.654,
+      "n": 100
+    },
+    "2_hop": {
+      "p50_ms": 33.971,
+      "p95_ms": 111.53,
+      "min_ms": 2.538,
+      "max_ms": 184.862,
+      "n": 100
+    },
+    "3_hop": {
+      "p50_ms": 48.797,
+      "p95_ms": 110.621,
+      "min_ms": 2.651,
+      "max_ms": 192.253,
+      "n": 100
+    }
+  },
+  "lookups": {
+    "point_lookup": {
+      "p50_ms": 7.031,
+      "p95_ms": 84.601,
+      "min_ms": 1.778,
+      "max_ms": 96.142,
+      "n": 100
+    },
+    "filtered_lookup": {
+      "p50_ms": 18.155,
+      "p95_ms": 84.867,
+      "min_ms": 3.955,
+      "max_ms": 99.023,
+      "n": 100
+    }
+  },
+  "aggregation": {
+    "p50_ms": 97.618,
+    "p95_ms": 196.926,
+    "min_ms": 7.439,
+    "max_ms": 284.803,
+    "n": 100
+  },
+  "footprint": {
+    "nodeCount": 18772,
+    "note": "counted via MATCH, APOC not available"
+  },
+  "mixed_workload": {
+    "1_clients": {
+      "total_ops": 1701,
+      "measured_window_seconds": 30,
+      "wall_clock_seconds": 30.2,
+      "throughput_qps": 56.7,
+      "write_ratio": 0.2
+    },
+    "10_clients": {
+      "total_ops": 3416,
+      "measured_window_seconds": 30,
+      "wall_clock_seconds": 30.51,
+      "throughput_qps": 113.87,
+      "write_ratio": 0.2
+    },
+    "40_clients": {
+      "total_ops": 4871,
+      "measured_window_seconds": 30,
+      "wall_clock_seconds": 31.09,
+      "throughput_qps": 162.37,
+      "write_ratio": 0.2
+    }
+  }
+}
