@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from src.adapters.arangodb_adapter import ArangoAdapter
 from src.adapters.bolt_adapter import BoltAdapter
 from src.adapters.dgraph_adapter import DgraphAdapter
+from src.adapters.kuzu_adapter import KuzuAdapter
 from src.metrics import Timer
 
 load_dotenv()
@@ -53,6 +54,8 @@ def build_adapter(platform: str):
         return ArangoAdapter()
     if platform == "dgraph":
         return DgraphAdapter()
+    if platform == "kuzu":
+        return KuzuAdapter()
     raise ValueError(f"Unknown platform: {platform}")
 
 
@@ -221,12 +224,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--platform", required=True,
-        choices=["cognodb", "neo4j", "memgraph", "arangodb", "dgraph", "all"],
+        choices=["cognodb", "neo4j", "memgraph", "arangodb", "dgraph", "kuzu", "all"],
     )
     args = parser.parse_args()
 
+    # dgraph excluded from "all" - OOM-killed at 192MB/400MB/512MB even
+    # after a clean volume reset; kuzu replaces it. "dgraph" still works
+    # as a manual --platform choice.
     platforms = (
-        ["cognodb", "neo4j", "memgraph", "arangodb", "dgraph"]
+        ["cognodb", "neo4j", "memgraph", "arangodb", "kuzu"]
         if args.platform == "all" else [args.platform]
     )
     for p in platforms:
