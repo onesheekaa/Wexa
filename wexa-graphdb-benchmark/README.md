@@ -34,22 +34,19 @@ self-hosted container in `docker-compose.yml` is capped to match:
 
 | Platform | vCPU | RAM | Disk |
 | --- | --- | --- | --- |
-| CognoDB Cloud | 0.5 (burstable) | 256 MB | 1 GB |
-| Neo4j | 0.5 (`cpus: 0.5`) | **512 MB** (`mem_limit: 512m`) | _(see caveat below)_ |
+| CognoDB Cloud | 0.5 (burstable) | **512 MB** (confirmed in console — see caveat below) | 1 GB |
+| Neo4j | 0.5 (`cpus: 0.5`) | 512 MB (`mem_limit: 512m`) — matches CognoDB's actual spec | _(see caveat below)_ |
 | Memgraph | 0.5 | 256 MB | _(see caveat below)_ |
 | ArangoDB | 0.5 | 256 MB | _(see caveat below)_ |
 | Dgraph (zero+alpha combined) | 0.5 (0.15 + 0.35) | 256 MB (64 MB + 192 MB) | _(see caveat below)_ |
 
-**Caveat, stated honestly:** Neo4j is the one platform not held to the 256 MB line.
-Its own JVM tuning in `docker-compose.yml` — 192 MB heap + 48 MB page cache + 200 MB
-metaspace ceiling + 64 MB direct memory — already adds up to roughly 500 MB before the
-container even starts serving queries, so a true 256 MB cap causes an OOM-kill on
-startup rather than a slow-but-working instance. Doubling Neo4j's ceiling to 512 MB
-while leaving every other self-hosted platform at 256 MB is a real, disclosed deviation
-from strict parity — not a silent one. It should be read as a data point in its own
-right: Neo4j 5's baseline JVM footprint is high enough that it cannot run at all in the
-same envelope CognoDB's free tier fits in, which is itself a fairness-relevant finding
-worth a line in the analysis section, not just a footnote here.
+**Caveat, stated honestly:** the assignment PDF states CognoDB's free tier is 256 MB,
+but the provisioned instance's own console shows **512 MB** under Specifications (see
+screenshot reference in project notes). Self-hosted containers were sized against the
+*observed* 512 MB, not the PDF's stated 256 MB, since the real instance is the more
+reliable source. Memgraph, ArangoDB, and Dgraph remain capped at 256 MB total in this
+repo's `docker-compose.yml` and were not raised to match — that's a real, disclosed
+asymmetry worth calling out in the analysis section rather than silently leaving as is.
 
 **Second caveat, stated honestly:** Docker's `mem_limit`/`cpus` enforce CPU and memory
 hard limits, but there's no equivalent one-line disk quota without a specific storage
