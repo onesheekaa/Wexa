@@ -5,14 +5,26 @@ covers three of your five platforms. Same driver, same queries -
 different connection details per instance.
 """
 import os
+import random
+import time
 from typing import Iterable, List, Optional
 
 from neo4j import GraphDatabase
+from neo4j.exceptions import TransientError
 
 from .base import GraphAdapter
 
 
 class BoltAdapter(GraphAdapter):
+    # BUGFIX: mixed workload writes to a shared pool of only 200 sampled
+    # node ids, so at concurrency=10/40 two threads legitimately hit the
+    # same node at once - the DB correctly raises
+    # Neo.TransientError.Transaction.DeadlockDetected, which means
+    # "retry this, it will likely succeed." Only TransientError is
+    # retried; anything else still raises immediately.
+    MAX_RETRIES = 3
+    BASE_BACKOFF_SECONDS = 0.05
+
     def __init__(self, name: str, uri_env: str, user_env: str, password_env: str,
                  database: Optional[str] = None):
         self.name = name
@@ -31,8 +43,15 @@ class BoltAdapter(GraphAdapter):
             self.driver.close()
 
     def _run(self, query: str, **params):
-        with self.driver.session(database=self.database) as session:
-            return list(session.run(query, **params))
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                with self.driver.session(database=self.database) as session:
+                    return list(session.run(query, **params))
+            except TransientError:
+                if attempt == self.MAX_RETRIES:
+                    raise
+                backoff = self.BASE_BACKOFF_SECONDS * (2 ** attempt) + random.uniform(0, 0.05)
+                time.sleep(backoff)
 
     def wipe(self) -> None:
         self._run("MATCH (n) DETACH DELETE n")
@@ -83,10 +102,34 @@ class BoltAdapter(GraphAdapter):
         self._run("MATCH (n:Node {label: $label}) RETURN n LIMIT $limit", label=label, limit=limit)
 
     def traversal(self, start_id: str, hops: int) -> None:
-        # hop count is baked into the query string (Cypher variable-length
-        # patterns can't take a parameter for hop depth)
-        query = f"MATCH (n:Node {{id: $id}})-[:REL*{hops}]->(m) RETURN DISTINCT m LIMIT 100"
+        # BUGFIX: unbounded -[:REL*{hops}]-> applies DISTINCT/LIMIT only
+        # after materializing every intermediate path, which explodes on
+        # hub nodes - this dataset has a degree-504 node vs a median
+        # degree of 9, and 3-hop from it took 22s and killed the CognoDB
+        # connection before this fix. Capped-BFS instead: each hop's
+        # frontier is limited to frontier_cap nodes before expanding
+        # further. Disclosed sampling bias at hub nodes, applied
+        # identically across every platform.
+        query = self._build_bounded_traversal_query(hops)
         self._run(query, id=start_id)
+
+    @staticmethod
+    def _build_bounded_traversal_query(hops: int, frontier_cap: int = 50, final_limit: int = 100) -> str:
+        lines = ["MATCH (n:Node {id: $id})"]
+        prev_var = "n"
+        next_var = "n"
+        for level in range(1, hops + 1):
+            next_var = f"h{level}"
+            lines.append(
+                f"CALL {{ WITH {prev_var} MATCH ({prev_var})-[:REL]->({next_var}) "
+                f"RETURN DISTINCT {next_var} LIMIT {frontier_cap} }}"
+            )
+            if level < hops:
+                lines.append(f"WITH collect(DISTINCT {next_var})[0..{frontier_cap}] AS frontier_{level}")
+                lines.append(f"UNWIND frontier_{level} AS {next_var}_seed")
+                prev_var = f"{next_var}_seed"
+        lines.append(f"RETURN DISTINCT {next_var} AS m LIMIT {final_limit}")
+        return "\n".join(lines)
 
     def aggregation(self) -> None:
         self._run("MATCH (n:Node) RETURN n.label AS label, count(*) AS c ORDER BY c DESC")
